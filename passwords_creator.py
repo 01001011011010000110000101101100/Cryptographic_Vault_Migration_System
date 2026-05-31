@@ -2,127 +2,121 @@ import json
 import string
 import os
 import sys
+import ctypes
 import base64
 import secrets
-import getpass  # Imported to hide password input during typing
+import getpass
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-# Using a hidden file name and path in the user directory to improve security
-JSON_FILE = os.path.join(os.path.expanduser('~'), '.secure_vault_data.dat')
+JSON_FILE = os.path.join(os.path.expanduser('~'), '.secure_vault_data.json')
 
-# Global variable to store the master password string
-# This allows dynamic key derivation using the unique salt found in the file
-MASTER_PASSWORD: str = "" 
+MASTER_PASSWORD: bytearray = bytearray()
 
-# --- Key Derivation Function ---
-def derive_key_from_password(master_password: str, salt: bytes) -> Fernet:
+def derive_key_from_password(master_password: bytearray, salt: bytes) -> Fernet:
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
         salt=salt,
-        iterations=400_000, # High iteration count to prevent brute-force attacks
+        iterations=400_000,
     )
-    key = base64.urlsafe_b64encode(kdf.derive(master_password.encode()))
+    key = base64.urlsafe_b64encode(kdf.derive(bytes(master_password)))
     return Fernet(key)
 
-# --- Helper Functions to Read and Write with Dynamic Salt ---
-def read_encrypted_vault():
-    """Reads the file, extracts the salt, decrypts and returns the database dictionary."""
+def wipe_buffer(objs):
+    for obj in objs:
+        if isinstance(obj, (bytearray, memoryview)):
+            for i in range(len(obj)):
+                obj[i] = 0
+        del obj
+
+def read_vault():
     if not os.path.exists(JSON_FILE):
-        return {}
+        return None
+    with open(JSON_FILE, 'r', encoding='utf-8') as json_file:
+        return json.load(json_file)
 
-    with open(JSON_FILE, 'rb') as json_file:
-        file_content = json_file.read()
+def write_vault(vault_data):
+    if os.path.exists(JSON_FILE) and os.name == 'nt':
+        ctypes.windll.kernel32.SetFileAttributesW(JSON_FILE, 0x80)
 
-    if not file_content:
-        return {}
+    with open(JSON_FILE, 'w', encoding='utf-8') as json_file:
+        json.dump(vault_data, json_file, ensure_ascii=False, indent=4)
 
-    # The first 16 bytes represent the unique random salt
-    salt = file_content[:16]
-    encrypted_data = file_content[16:]
+    if os.name == 'nt':
+        ctypes.windll.kernel32.SetFileAttributesW(JSON_FILE, 2)
 
-    # Derive the specific key using the extracted salt
-    fernet = derive_key_from_password(MASTER_PASSWORD, salt)
-    decrypted_data = fernet.decrypt(encrypted_data)
-    return json.loads(decrypted_data.decode('utf-8'))
-
-def write_encrypted_vault(all_data):
-    """Generates a new random salt, encrypts the dictionary, and writes [salt + ciphertext] to disk."""
-    # Generate a cryptographically secure 16-byte random salt
+def init_vault():
     new_salt = secrets.token_bytes(16)
     fernet = derive_key_from_password(MASTER_PASSWORD, new_salt)
+    verify_token = fernet.encrypt(b"VALID").decode('utf-8')
+    
+    vault_data = {
+        "_metadata": {
+            "salt": base64.urlsafe_b64encode(new_salt).decode('utf-8'),
+            "verify": verify_token
+        },
+        "data": {}
+    }
+    write_vault(vault_data)
+    return vault_data
 
-    json_string = json.dumps(all_data, ensure_ascii=False, indent=4)
-    encrypted_data = fernet.encrypt(json_string.encode('utf-8'))
+def get_fernet_instance(vault_data):
+    salt = base64.urlsafe_b64decode(vault_data["_metadata"]["salt"])
+    return derive_key_from_password(MASTER_PASSWORD, salt)
 
-    # Concatenate salt and encrypted data before writing
-    with open(JSON_FILE, 'wb') as json_file:
-        json_file.write(new_salt + encrypted_data)
-
-# --- View Saved Passwords Function ---
 def view_passwords():
     print("\n--- Saved Passwords ---")
-    try:
-        all_data = read_encrypted_vault()
-        if not all_data:
-            print("No passwords saved yet.")
-            return
-            
-        for user, apps in all_data.items():
-            print(f"\nUser: {user}")
-            for app, pwd in apps.items():
-                print(f"   - {app}: {pwd}")
-                
-    except InvalidToken:
-        print("\n[SECURITY WARNING]:")
-        print("The database file has been altered, corrupted, or an incorrect Master Password was entered!")
-        print("Decryption is blocked to protect data integrity.")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+    vault = read_vault()
+    if not vault or not vault.get("data"):
+        print("No passwords saved yet.")
+        return
+
+    fernet = get_fernet_instance(vault)
+
+    for user, apps in vault["data"].items():
+        print(f"\nUser: {user}")
+        for app, enc_pwd_str in apps.items():
+            try:
+                decrypted_bytes = fernet.decrypt(enc_pwd_str.encode('utf-8'))
+                pwd_ba = bytearray(decrypted_bytes)
+                print(f"   - {app}: {pwd_ba.decode('utf-8')}")
+                wipe_buffer([pwd_ba])
+            except Exception:
+                print(f"   - {app}: [DECRYPTION FAILED - Data Corrupted]")
     print("\n-----------------------------\n")
 
-# --- Delete User Function ---
 def delete_user():
     print("\n--- Delete User ---")
-    if not os.path.exists(JSON_FILE):
+    vault = read_vault()
+    if not vault or not vault.get("data"):
         print("No data available to delete.")
         return
 
-    user_to_delete = input("Enter the username you want to delete => ").strip()
+    user_to_delete = bytearray(input("Enter the username you want to delete => ").strip().encode('utf-8'))
+    user_str = user_to_delete.decode('utf-8')
 
-    try:
-        all_data = read_encrypted_vault()
-            
-        if user_to_delete in all_data:
-            confirm = get_yes_no(f"Are you sure you want to delete user '{user_to_delete}' and all their passwords?")
-            if confirm:
-                del all_data[user_to_delete]
-                write_encrypted_vault(all_data)
-                print(f"User '{user_to_delete}' has been deleted successfully.")
-            else:
-                print("Deletion canceled.")
+    if user_str in vault["data"]:
+        confirm = get_yes_no(f"Are you sure you want to delete user '{user_str}' and all their passwords?")
+        if confirm:
+            del vault["data"][user_str]
+            write_vault(vault)
+            print(f"User '{user_str}' has been deleted successfully.")
         else:
-            print(f"User '{user_to_delete}' not found.")
-            
-    except InvalidToken:
-        print("\n[SECURITY WARNING]: Cannot modify the file because it has been altered or corrupted externally.")
-    except Exception as e:
-        print(f"Error updating the file during deletion: {e}")
+            print("Deletion canceled.")
+    else:
+        print(f"User '{user_str}' not found.")
+    
+    wipe_buffer([user_to_delete])
 
-# Inputs and UI messages
 input_message = '''
     How you want your password be ?
 
 "p" = with punctuation and other matters (e.g., M9$vp),
-
 "n" = with numbers and other matters unless punctuation (e.g., Lo89N),
-
 "c" = with capital letters without numbers and punctuation (e.g., LobyJ),
-
 "s" = standard which means only small letters (e.g., syboq),
-
 "e" = exit
 => '''
 
@@ -146,55 +140,76 @@ def get_yes_no(question):
         return answer == 'y'
     
 def take_inputs():
-    name = input("User name that use the password => ").strip()
-    app = input("The password for what (e.g., Google) => ").strip()
+    name = bytearray(input("User name that use the password => ").strip().encode('utf-8'))
+    app = bytearray(input("The password for what (e.g., Google) => ").strip().encode('utf-8'))
     count = get_int_input("Password Length (integer) => ")
     choice = input(input_message).strip().lower()
     return name, app, count, choice
 
-def load_to_json(user_name, app_name, password):
-    try:
-        all_data = read_encrypted_vault()
-    except Exception:
-        all_data = {}
+def load_to_json(user_name_ba, app_name_ba, password_ba):
+    vault = read_vault()
+    if not vault:
+        vault = init_vault()
 
-    if user_name in all_data:
-        all_data[user_name][app_name] = password
-    else:
-        all_data[user_name] = {app_name: password}
+    fernet = get_fernet_instance(vault)
+    
+    user_str = user_name_ba.decode('utf-8')
+    app_str = app_name_ba.decode('utf-8')
+    
+    enc_pwd_str = fernet.encrypt(bytes(password_ba)).decode('utf-8')
+
+    if user_str not in vault["data"]:
+        vault["data"][user_str] = {}
+    vault["data"][user_str][app_str] = enc_pwd_str
 
     try:
-        write_encrypted_vault(all_data)
+        write_vault(vault)
         print('The password saved and encrypted successfully.')
     except OSError as e:
         print(f'An error occurred info: {e}')
+    
+    wipe_buffer([user_name_ba, app_name_ba, password_ba])
 
-# --- Cryptographically secure password generation functions using secrets module ---
 def with_punctuation(count):
-    all_char = string.ascii_letters + string.digits + string.punctuation
-    return ''.join(secrets.choice(all_char) for _ in range(count))
+    all_char = (string.ascii_letters + string.digits + string.punctuation).encode('utf-8')
+    pwd_bytes = bytearray(count)
+    for i in range(count):
+        pwd_bytes[i] = ord(secrets.choice(all_char))
+    return pwd_bytes
 
 def with_number(count):
-    all_char = string.ascii_letters + string.digits
-    return ''.join(secrets.choice(all_char) for _ in range(count))
+    all_char = (string.ascii_letters + string.digits).encode('utf-8')
+    pwd_bytes = bytearray(count)
+    for i in range(count):
+        pwd_bytes[i] = ord(secrets.choice(all_char))
+    return pwd_bytes
 
 def with_capital(count):
-    all_char = string.ascii_letters
-    return ''.join(secrets.choice(all_char) for _ in range(count))
+    all_char = (string.ascii_uppercase + string.ascii_lowercase).encode('utf-8')
+    pwd_bytes = bytearray(count)
+    for i in range(count):
+        pwd_bytes[i] = ord(secrets.choice(all_char))
+    return pwd_bytes
 
 def stander(count):
-    all_char = string.ascii_lowercase
-    return ''.join(secrets.choice(all_char) for _ in range(count))
+    all_char = (string.ascii_lowercase).encode('utf-8')
+    pwd_bytes = bytearray(count)
+    for i in range(count):
+        pwd_bytes[i] = ord(secrets.choice(all_char))
+    return pwd_bytes
 
 def exit_app():
+    global MASTER_PASSWORD
+    wipe_buffer([MASTER_PASSWORD])
     print("Exiting the app...")
     sys.exit(0)
 
 def creat_password(func, *args, **kwargs):
     while True:
-        password = func(*args, **kwargs)
-        print(f'The password is : {password}\n')
+        password = bytearray(func(*args, **kwargs)) 
+        print(f'The password is : {password.decode("utf-8")}\n')
         if get_yes_no('Do you want a new password ?'):
+            wipe_buffer([password])
             continue
         return password
 
@@ -212,48 +227,53 @@ def run_password_creator():
 
         if choice not in valid_inputs:
             print("Invalid input please try again")
+            wipe_buffer([name, app])
             continue
 
         if choice == 'e':
+            wipe_buffer([name, app])
             return
 
         act = actions[choice]
         password = creat_password(act, count)
-        print(f"\nName : {name}, App : {app}, Password : {password}\n")
+        print(f"\nName : {name.decode('utf-8')}, App : {app.decode('utf-8')}, Password : {password.decode('utf-8')}\n")
         
         save_json = get_yes_no('Do you want save it in JSON file ?')
         if save_json:
             load_to_json(name, app, password)
         else:
             print('The password has not saved')
+            wipe_buffer([name, app, password])
 
         want_con = get_yes_no("Do you want continue making passwords ?")
         if not want_con:
             break
 
-# Main Menu
 def start():
     global MASTER_PASSWORD
     print("<< Passwords Creator & Manager >>")
     
-    # getpass.getpass hides the input completely for maximum privacy
-    master_password = getpass.getpass("Enter your Master Password to unlock (Input will be hidden): ").strip()
+    master_password = bytearray(getpass.getpass("Enter your Master Password to unlock (Input will be hidden): ").strip().encode('utf-8'))
+    
     if not master_password:
         print("Master Password cannot be empty. Exiting...")
         return
         
     MASTER_PASSWORD = master_password
 
-    if os.path.exists(JSON_FILE):
+    vault = read_vault()
+    if vault:
         try:
-            # Attempt to read the vault to test if the master password is correct
-            read_encrypted_vault()
+            fernet = get_fernet_instance(vault)
+            fernet.decrypt(vault["_metadata"]["verify"].encode('utf-8'))
             print("Access Granted. Database unlocked successfully.")
         except InvalidToken:
             print("\n[ACCESS DENIED]: Incorrect Master Password! Exiting to protect data integrity.")
+            wipe_buffer([MASTER_PASSWORD])
             sys.exit(1)
         except Exception as e:
             print(f"Error accessing database: {e}")
+            wipe_buffer([MASTER_PASSWORD])
             sys.exit(1)
     else:
         print("No existing database found. A new one will be created upon saving your first password.")
