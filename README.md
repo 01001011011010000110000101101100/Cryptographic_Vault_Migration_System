@@ -24,21 +24,14 @@ The migration module acts as a formal Extract-Transform-Load (ETL) pipeline. It 
 The system manages dynamic state evaluation and initialization gates directly using secure operating system abstractions:
 
 ```python
-def derive_key(master_password: str, salt: bytes) -> Fernet:
-    """
-    Computes a cryptographically strong symmetric key from a raw master string
-    by running a high-iteration PBKDF2 configuration.
-    """
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt,
-        iterations=400_000,
-    )
-    key = base64.urlsafe_b64encode(kdf.derive(master_password.encode()))
-    return Fernet(key)
-Operational Pipeline
-Password Management Loop (passwords_creator.py): Drives interactive CRUD routines over local binary objects, handling account insertion, credential deletions, and automated CSPRNG-driven string generator selection safely in terminal buffers.
+def wipe_buffer(objs):
+    for obj in objs:
+        if isinstance(obj, (bytearray, memoryview)):
+            for i in range(len(obj)):
+                obj[i] = 0
+        del obj
+memory management
+Change valiue to zero and delete it from memory. Consequently, malwers that RAM do not have access on passwords, that means more safty 
 
 Schema Upgrade Loop (migrate.py): Acts as a migration gatekeeper, ensuring safe migration of legacy text data, intercepting potential binary collisions, and validating structural boundaries prior to file system writes.
 
