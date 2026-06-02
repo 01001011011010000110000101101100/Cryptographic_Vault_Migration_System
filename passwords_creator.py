@@ -45,7 +45,7 @@ def write_vault(vault_data):
         json.dump(vault_data, json_file, ensure_ascii=False, indent=4)
 
     if os.name == 'nt':
-        ctypes.windll.kernel32.SetFileAttributesW(JSON_FILE, 2)
+        ctypes.windll.kernel32.SetFileAttributesW(JSON_FILE, 0x06)
 
 def init_vault():
     new_salt = secrets.token_bytes(16)
@@ -79,9 +79,12 @@ def view_passwords():
         print(f"\nUser: {user}")
         for app, enc_pwd_str in apps.items():
             try:
-                decrypted_bytes = fernet.decrypt(enc_pwd_str.encode('utf-8'))
-                pwd_ba = bytearray(decrypted_bytes)
-                print(f"   - {app}: {pwd_ba.decode('utf-8')}")
+                decrypted_bytes = bytearray(fernet.decrypt(enc_pwd_str.encode('utf-8')))
+                pwd_ba = decrypted_bytes
+                print(f"   - {app}: ", end="")
+                for byte in pwd_ba:
+                    print(chr(byte), end="")
+                print()
                 wipe_buffer([pwd_ba])
             except Exception:
                 print(f"   - {app}: [DECRYPTION FAILED - Data Corrupted]")
@@ -94,21 +97,18 @@ def delete_user():
         print("No data available to delete.")
         return
 
-    user_to_delete = bytearray(input("Enter the username you want to delete => ").strip().encode('utf-8'))
-    user_str = user_to_delete.decode('utf-8')
-
-    if user_str in vault["data"]:
-        confirm = get_yes_no(f"Are you sure you want to delete user '{user_str}' and all their passwords?")
+    user_to_delete = input("Enter the username you want to delete => ").strip()
+    
+    if user_to_delete in vault["data"]:
+        confirm = get_yes_no(f"Are you sure you want to delete user '{user_to_delete}' and all their passwords?")
         if confirm:
-            del vault["data"][user_str]
+            del vault["data"][user_to_delete]
             write_vault(vault)
-            print(f"User '{user_str}' has been deleted successfully.")
+            print(f"User '{user_to_delete}' has been deleted successfully.")
         else:
             print("Deletion canceled.")
     else:
-        print(f"User '{user_str}' not found.")
-    
-    wipe_buffer([user_to_delete])
+        print(f"User '{user_to_delete}' not found.")
 
 input_message = '''
     How you want your password be ?
@@ -140,27 +140,24 @@ def get_yes_no(question):
         return answer == 'y'
     
 def take_inputs():
-    name = bytearray(input("User name that use the password => ").strip().encode('utf-8'))
-    app = bytearray(input("The password for what (e.g., Google) => ").strip().encode('utf-8'))
+    name =input("User name that use the password => ").strip()
+    app = input("The password for what (e.g., Google) => ").strip()
     count = get_int_input("Password Length (integer) => ")
     choice = input(input_message).strip().lower()
     return name, app, count, choice
 
-def load_to_json(user_name_ba, app_name_ba, password_ba):
+def load_to_json(user_name, app_name, password_ba):
     vault = read_vault()
     if not vault:
         vault = init_vault()
 
     fernet = get_fernet_instance(vault)
     
-    user_str = user_name_ba.decode('utf-8')
-    app_str = app_name_ba.decode('utf-8')
-    
     enc_pwd_str = fernet.encrypt(bytes(password_ba)).decode('utf-8')
 
-    if user_str not in vault["data"]:
-        vault["data"][user_str] = {}
-    vault["data"][user_str][app_str] = enc_pwd_str
+    if user_name not in vault["data"]:
+        vault["data"][user_name] = {}
+    vault["data"][user_name][app_name] = enc_pwd_str
 
     try:
         write_vault(vault)
@@ -168,7 +165,7 @@ def load_to_json(user_name_ba, app_name_ba, password_ba):
     except OSError as e:
         print(f'An error occurred info: {e}')
     
-    wipe_buffer([user_name_ba, app_name_ba, password_ba])
+    wipe_buffer([password_ba])
 
 def with_punctuation(count):
     all_char = (string.ascii_letters + string.digits + string.punctuation).encode('utf-8')
@@ -227,23 +224,25 @@ def run_password_creator():
 
         if choice not in valid_inputs:
             print("Invalid input please try again")
-            wipe_buffer([name, app])
             continue
 
         if choice == 'e':
-            wipe_buffer([name, app])
             return
 
         act = actions[choice]
         password = creat_password(act, count)
-        print(f"\nName : {name.decode('utf-8')}, App : {app.decode('utf-8')}, Password : {password.decode('utf-8')}\n")
+        print(f"\nName : {name}, App : {app}, Password : ", end="")
+
+        for byte in password:
+            print(chr(byte), end="")
+        print("\n")
         
         save_json = get_yes_no('Do you want save it in JSON file ?')
         if save_json:
             load_to_json(name, app, password)
         else:
             print('The password has not saved')
-            wipe_buffer([name, app, password])
+            wipe_buffer([password])
 
         want_con = get_yes_no("Do you want continue making passwords ?")
         if not want_con:
