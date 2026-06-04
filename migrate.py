@@ -1,13 +1,14 @@
-import json
 import os
 import sys
-import ctypes 
+from json import load, dump
 from base64 import urlsafe_b64encode, urlsafe_b64decode
-import secrets
-import getpass
+from secrets import token_bytes
+from getpass import getpass
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+if os.name == 'nt':
+    from ctypes.windll.kernel32 import SetFileAttributesW # type: ignore
 
 BASE_DIR = os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(__file__))
 OLD_JSON_FILE = os.path.join(BASE_DIR, 'old_passwords.json')
@@ -51,20 +52,20 @@ def migrate_passwords():
 
     try:
         with open(OLD_JSON_FILE, 'r', encoding='utf-8') as f:
-            old_data = json.load(f)
+            old_data = load(f)
         print("Success: Unencrypted data loaded successfully.")
     except Exception as e:
         print(f"Error reading old data file: {e}")
         return
 
-    main_password = bytearray(getpass.getpass("Create your Master Password for encryption => ").strip().encode('utf-8'))
+    main_password = bytearray(getpass("Create your Master Password for encryption => ").strip().encode('utf-8'))
     if not main_password:
         print("Master Password cannot be empty.")
         return
 
     MASTER_PASSWORD = main_password
 
-    new_salt = secrets.token_bytes(16)
+    new_salt = token_bytes(16)
     fernet = derive_key_from_password(MASTER_PASSWORD, new_salt)
     verify_token = fernet.encrypt(b"VALID").decode('utf-8')
     
@@ -107,10 +108,10 @@ def migrate_passwords():
     if os.path.exists(NEW_JSON_FILE):
 
         if os.name == 'nt' :
-            ctypes.windll.kernel32.SetFileAttributesW(NEW_JSON_FILE, 0x80)
+            SetFileAttributesW(NEW_JSON_FILE, 0x80)
 
         with open(NEW_JSON_FILE, 'r', encoding='utf-8') as f :
-            secret_vault = json.load(f)
+            secret_vault = load(f)
             if secret_vault :
                 try :
                     old_fernet = get_fernet_instance(secret_vault, MASTER_PASSWORD=MASTER_PASSWORD)
@@ -131,10 +132,10 @@ def migrate_passwords():
 
     try:
         with open(NEW_JSON_FILE, 'w', encoding='utf-8') as json_file:
-            json.dump(vault_data, json_file, ensure_ascii=False, indent=4)
+            dump(vault_data, json_file, ensure_ascii=False, indent=4)
 
         if os.name == 'nt':
-            ctypes.windll.kernel32.SetFileAttributesW(NEW_JSON_FILE, 0x06)
+            SetFileAttributesW(NEW_JSON_FILE, 0x06)
             
         print(f"\nSuccess: Data successfully migrated to: {NEW_JSON_FILE}")
         print("You can now open your main program and unlock it with this Master Password.")
@@ -149,7 +150,7 @@ def migrate_passwords():
         try:
             file_size = os.path.getsize(OLD_JSON_FILE)
             with open(OLD_JSON_FILE, 'wb') as f:
-                f.write(secrets.token_bytes(file_size))
+                f.write(token_bytes(file_size))
             os.remove(OLD_JSON_FILE)
             print("Success: 'old_passwords.json' has been completely destroyed.")
         except Exception as e:
