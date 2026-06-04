@@ -1,12 +1,15 @@
+# Bilt-in modules
 import os
 import sys
 from json import load, dump
 from base64 import urlsafe_b64encode, urlsafe_b64decode
 from secrets import token_bytes
 from getpass import getpass
+# External modules
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+# OS built-in modules
 if os.name == 'nt':
     from ctypes.windll.kernel32 import SetFileAttributesW # type: ignore
 
