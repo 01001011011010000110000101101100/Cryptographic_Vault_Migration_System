@@ -1,10 +1,10 @@
 # Built-in modules
 import os
+import secrets
 from json import load, dump
 from string import ascii_letters, digits, punctuation, ascii_uppercase, ascii_lowercase
 from sys import exit
 from base64 import urlsafe_b64encode, urlsafe_b64decode
-from secrets import token_bytes, choice
 from getpass import getpass
 # External modules
 from cryptography.fernet import Fernet, InvalidToken
@@ -31,8 +31,7 @@ def derive_key_from_password(master_password: bytearray, salt: bytes) -> Fernet:
 def wipe_buffer(objs):
     for obj in objs:
         if isinstance(obj, (bytearray, memoryview)):
-            for i in range(len(obj)):
-                obj[i] = 0
+            obj[:] = b'\x00' * len(obj)
         del obj
 
 def read_vault():
@@ -52,7 +51,7 @@ def write_vault(vault_data):
        SetFileAttributesW(JSON_FILE, 0x06)
 
 def init_vault():
-    new_salt = token_bytes(16)
+    new_salt = secrets.token_bytes(16)
     fernet = derive_key_from_password(MASTER_PASSWORD, new_salt)
     verify_token = fernet.encrypt(b"VALID").decode('utf-8')
     
@@ -175,28 +174,28 @@ def with_punctuation(count):
     all_char = (ascii_letters + digits + punctuation).encode('utf-8')
     pwd_bytes = bytearray(count)
     for i in range(count):
-        pwd_bytes[i] = ord(choice(all_char))
+        pwd_bytes[i] = (secrets.choice(all_char))
     return pwd_bytes
 
 def with_number(count):
     all_char = (ascii_letters + digits).encode('utf-8')
     pwd_bytes = bytearray(count)
     for i in range(count):
-        pwd_bytes[i] = ord(choice(all_char))
+        pwd_bytes[i] = (secrets.choice(all_char))
     return pwd_bytes
 
 def with_capital(count):
     all_char = (ascii_uppercase + ascii_lowercase).encode('utf-8')
     pwd_bytes = bytearray(count)
     for i in range(count):
-        pwd_bytes[i] = ord(choice(all_char))
+        pwd_bytes[i] = (secrets.choice(all_char))
     return pwd_bytes
 
 def stander(count):
     all_char = (ascii_lowercase).encode('utf-8')
     pwd_bytes = bytearray(count)
     for i in range(count):
-        pwd_bytes[i] = ord(choice(all_char))
+        pwd_bytes[i] = (secrets.choice(all_char))
     return pwd_bytes
 
 def exit_app():
