@@ -3,7 +3,7 @@ import os
 import secrets
 from json import load, dump
 from string import ascii_letters, digits, punctuation, ascii_uppercase, ascii_lowercase
-from sys import exit
+import sys
 from base64 import urlsafe_b64encode, urlsafe_b64decode
 from getpass import getpass
 # External modules
@@ -202,7 +202,7 @@ def exit_app():
     global MASTER_PASSWORD
     wipe_buffer([MASTER_PASSWORD])
     print("Exiting the app...")
-    exit(0)
+    sys.exit(0)
 
 def creat_password(func, *args, **kwargs):
     while True:
@@ -272,11 +272,11 @@ def start():
         except InvalidToken:
             print("\n[ACCESS DENIED]: Incorrect Master Password! Exiting to protect data integrity.")
             wipe_buffer([MASTER_PASSWORD])
-            exit(1)
+            sys.exit(1)
         except Exception as e:
             print(f"Error accessing database: {e}")
             wipe_buffer([MASTER_PASSWORD])
-            exit(1)
+            sys.exit(1)
     else:
         print("No existing database found. A new one will be created upon saving your first password.")
 
