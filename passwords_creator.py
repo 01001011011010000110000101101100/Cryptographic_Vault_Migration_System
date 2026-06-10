@@ -12,7 +12,8 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 # OS bulit-in modules
 if os.name == 'nt':
-    from ctypes.windll.kernel32 import SetFileAttributesW # type: ignore
+    import ctypes
+    SetFileAttributesW = ctypes.windll.kernel32.SetFileAttributesW
 
 JSON_FILE = os.path.join(os.path.expanduser('~'), '.secure_vault_data.json')
 
