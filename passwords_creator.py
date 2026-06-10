@@ -84,9 +84,7 @@ def view_passwords():
             try:
                 decrypted_bytes = bytearray(fernet.decrypt(enc_pwd_str.encode('utf-8')))
                 pwd_ba = decrypted_bytes
-                print(f"   - {app}: ", end="")
-                for byte in pwd_ba:
-                    print(chr(byte), end="")
+                print(f"   - {app}: {pwd_ba.decode('utf-8')}")
                 print()
                 wipe_buffer([pwd_ba])
             except Exception:
@@ -234,11 +232,7 @@ def run_password_creator():
 
         act = actions[choice]
         password = creat_password(act, count)
-        print(f"\nName : {name}, App : {app}, Password : ", end="")
-
-        for byte in password:
-            print(chr(byte), end="")
-        print("\n")
+        print(f"\nName : {name}, App : {app}, Password : {password.decode('utf-8')}", end='\n\n')
         
         save_json = get_yes_no('Do you want save it in JSON file ?')
         if save_json:
